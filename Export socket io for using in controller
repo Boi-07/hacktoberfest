@@ -1,0 +1,108 @@
+//Server.js
+const app = require("express")();
+const httpServer = require("http").createServer(app);
+const configs = require('config');
+const mongoose = require('mongoose');
+const { config, engine } = require('express-edge');
+const express = require('express');
+const cookieParser = require('cookie-parser')
+const fileUpload = require('express-fileupload');
+const router = require('./router/Router');
+const cors = require('cors');
+const io = require('socket.io')(httpServer,{
+    origin : ["https://admin.socket.io"]
+})
+require('colors');
+//config edge view template engine
+// Configure Edge if need to
+config({ cache: process.env.NODE_ENV === 'production' });
+
+//Server middleware
+// Automatically sets view engine and adds dot notation to app.render
+app.use(cors({
+    origin : "http://localhost:3000",
+    methods : ['GET', 'POST', 'PUT', 'DELETE']
+}));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser())
+app.use(fileUpload());
+app.use(engine);
+app.set('views', `${__dirname}/views`);
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(__dirname + '/public'));
+app.use(router);
+//Database
+mongoose.connect(`mongodb://${configs.db_host}:${configs.db_port}/${configs.db_name}`, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+}).catch(error => {
+    console.log("Can't connect to Database because : " + error.message);
+});
+
+// starting Server
+httpServer.listen(configs.app_port, () => {
+    console.log(`Server started at: http://localhost:${configs.app_port}`.cyan);
+});
+
+module.exports = {server : httpServer, connection : mongoose, io : io}
+//conroller.js
+const User = require('../Models/User');
+const randomString = require('randomstring');
+const Chat = require('../Models/ChatRoom');
+const NodeCache = require( "node-cache" );
+const Cache = new NodeCache();
+const ResponseFormat = require('./ResponseFormat');
+const { io } = require('../../server');
+module.exports = class ChatController {
+    getInviteCode = async (request, response) => {
+        try {
+            let code = randomString.generate(6);
+            let user = Cache.has(request.token) ? Cache.get(request.token) : await User.findOne({ token : request.token }).exec();
+            let chatRoom = await Chat.create({
+                code : code,
+                user_id : user._id
+            });
+            let message = "اتاق چت محرمانه با موفقیت ایجاد شد";
+            ResponseFormat.setSuccessResponse(response, message, request.token, {code : code, roomId : chatRoom._id });
+            return;
+        } catch (error) {
+            let code = 500;
+            ResponseFormat.setFailureResponse(response, error.message, code, null, null);
+            return;
+        }
+    }
+joinChat = async(request, response, io) => {
+        console.log(io)
+        try{
+            let token = request.token;
+            let friend =  Cache.has(token) ? Cache.get(token) : await User.findOne({ token : token }).exec();
+            let chatRoom = await Chat.findOne({code : request.query.code}).exec();
+            if(chatRoom !== null)
+            {
+                if(chatRoom.friend_id !== undefined && chatRoom.friend_id == friend._id)
+                {
+                    let code = 416;
+                    let message = "شما قبلا به این اتاق پیوستید";
+                    ResponseFormat.setFailureResponse(response, message, code, token, null);
+                    return;
+                }
+                chatRoom.friend_id = friend._id;
+                chatRoom.save(() => {
+                    let message = "کاربر با موفقیت به اتاق چت پیوست";
+                    ResponseFormat.setSuccessResponse(response, message, token, {roomId : chatRoom._id});
+                    return;
+                });
+            }else{
+                let message = "اتاق مورد نظر یافت نشد";
+                let code = 404;
+                ResponseFormat.setFailureResponse(response, message, code, token, null);
+                return;
+            }
+        } catch (error) {
+            let code = 500;
+            ResponseFormat.setFailureResponse(response, error.message, code, null, null);
+            return;
+        }
+    }
+}
