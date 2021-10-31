@@ -1,0 +1,22 @@
+import zipfile
+import requests
+import os
+
+pics = ['url/1.jpg', 'url/2.jpg', 'url/3.jpg']
+dir = /directory
+
+with zipfile.ZipFile(dir + '/test.zip', 'w') as my_zip:
+
+
+
+
+    for x in range(len(pics)):
+        
+        fn = dir + '/' + pics[x].split('/')[-1]
+        
+        r = requests.get(pics[x], allow_redirects=True)
+        open(fn, 'wb').write(r.content)
+    
+        my_zip.write(fn, str(x+1) + os.path.splitext(fn)[1])
+        
+        os.remove(fn)
